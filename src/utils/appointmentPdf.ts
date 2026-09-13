@@ -25,6 +25,10 @@ export function createAppointmentPdf(booking: ConsultationBooking): jsPDF {
   const bgLight = [248, 250, 252]; // #f8fafc
   const confirmedGreen = [16, 149, 108]; // #10956c
   const confirmedGreenBg = [236, 253, 245]; // #ecfdf5
+  const pendingAmber = [180, 83, 9]; // #b45309
+  const pendingAmberBg = [254, 243, 199]; // #fef3c7
+
+  const isPending = booking.status === 'Pending';
 
   // 1. Top Decorative Header Bar
   doc.setFillColor(primaryTeal[0], primaryTeal[1], primaryTeal[2]);
@@ -86,29 +90,46 @@ export function createAppointmentPdf(booking: ConsultationBooking): jsPDF {
   doc.setTextColor(darkSlate[0], darkSlate[1], darkSlate[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text('APPOINTMENT CONFIRMATION', margin + 6, currentY + 7);
+  const docHeading = isPending ? 'BOOKING RECEIPT' : 'APPOINTMENT CONFIRMATION';
+  doc.text(docHeading, margin + 6, currentY + 7);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-  doc.text('Official Consultation Booking Slip & Digital Receipt', margin + 6, currentY + 12);
+  const docSubtext = isPending
+    ? 'Official Consultation Booking Request & Digital Receipt'
+    : 'Official Consultation Booking Slip & Digital Confirmation';
+  doc.text(docSubtext, margin + 6, currentY + 12);
 
-  // Status: CONFIRMED pill on the right of title banner
-  const pillWidth = 42;
+  // Status pill on the right of title banner
+  const pillWidth = 46;
   const pillHeight = 9;
   const pillX = rightX - pillWidth - 4;
   const pillY = currentY + 3.5;
 
-  doc.setFillColor(confirmedGreenBg[0], confirmedGreenBg[1], confirmedGreenBg[2]);
-  doc.roundedRect(pillX, pillY, pillWidth, pillHeight, 2, 2, 'F');
-  doc.setDrawColor(confirmedGreen[0], confirmedGreen[1], confirmedGreen[2]);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(pillX, pillY, pillWidth, pillHeight, 2, 2, 'S');
+  if (isPending) {
+    doc.setFillColor(pendingAmberBg[0], pendingAmberBg[1], pendingAmberBg[2]);
+    doc.roundedRect(pillX, pillY, pillWidth, pillHeight, 2, 2, 'F');
+    doc.setDrawColor(pendingAmber[0], pendingAmber[1], pendingAmber[2]);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(pillX, pillY, pillWidth, pillHeight, 2, 2, 'S');
 
-  doc.setTextColor(confirmedGreen[0], confirmedGreen[1], confirmedGreen[2]);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.text('STATUS: CONFIRMED', pillX + pillWidth / 2, pillY + 5.8, { align: 'center' });
+    doc.setTextColor(pendingAmber[0], pendingAmber[1], pendingAmber[2]);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text('STATUS: PENDING', pillX + pillWidth / 2, pillY + 5.8, { align: 'center' });
+  } else {
+    doc.setFillColor(confirmedGreenBg[0], confirmedGreenBg[1], confirmedGreenBg[2]);
+    doc.roundedRect(pillX, pillY, pillWidth, pillHeight, 2, 2, 'F');
+    doc.setDrawColor(confirmedGreen[0], confirmedGreen[1], confirmedGreen[2]);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(pillX, pillY, pillWidth, pillHeight, 2, 2, 'S');
+
+    doc.setTextColor(confirmedGreen[0], confirmedGreen[1], confirmedGreen[2]);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text(`STATUS: ${booking.status.toUpperCase()}`, pillX + pillWidth / 2, pillY + 5.8, { align: 'center' });
+  }
 
   // 4. Booking ID & Issue Date Banner
   currentY += titleBoxHeight + 6;
@@ -245,8 +266,13 @@ export function createAppointmentPdf(booking: ConsultationBooking): jsPDF {
   doc.setTextColor(darkSlate[0], darkSlate[1], darkSlate[2]);
   doc.text(booking.consultationType, margin + 6, schedRowY);
 
-  doc.setTextColor(confirmedGreen[0], confirmedGreen[1], confirmedGreen[2]);
-  doc.text('CONFIRMED', margin + 95, schedRowY);
+  if (isPending) {
+    doc.setTextColor(pendingAmber[0], pendingAmber[1], pendingAmber[2]);
+    doc.text('PENDING', margin + 95, schedRowY);
+  } else {
+    doc.setTextColor(confirmedGreen[0], confirmedGreen[1], confirmedGreen[2]);
+    doc.text(booking.status.toUpperCase(), margin + 95, schedRowY);
+  }
 
   // Row 3: Consultation Reason / Specialty
   schedRowY += 8;
@@ -354,7 +380,8 @@ export function downloadAppointmentPdf(booking: ConsultationBooking): void {
   try {
     const doc = createAppointmentPdf(booking);
     const sanitizedName = booking.patientName.replace(/[^a-zA-Z0-9]/g, '_');
-    const filename = `Appointment_Confirmation_${booking.id}_${sanitizedName}.pdf`;
+    const prefix = booking.status === 'Pending' ? 'Booking_Receipt' : 'Appointment_Confirmation';
+    const filename = `${prefix}_${booking.id}_${sanitizedName}.pdf`;
     doc.save(filename);
   } catch (err) {
     console.error('Error downloading appointment PDF:', err);

@@ -49,7 +49,7 @@ export interface AppointmentFormData {
 
 export type BookingGender = 'Female' | 'Male' | 'Other';
 export type ConsultationType = 'In-Clinic Consultation' | 'Online Consultation';
-export type BookingStatus = 'Confirmed' | 'Completed' | 'Cancelled';
+export type BookingStatus = 'Pending' | 'Confirmed' | 'Completed' | 'Cancelled';
 
 export interface ConsultationBooking {
   id: string; // e.g. "DAS-2026-8492"
@@ -63,7 +63,9 @@ export interface ConsultationBooking {
   date: string;
   time: string;
   consultationType: ConsultationType;
+  additionalMessage?: string;
   status: BookingStatus;
+  confirmation?: string;
   createdAt: string;
   syncedToSupabase?: boolean;
 }

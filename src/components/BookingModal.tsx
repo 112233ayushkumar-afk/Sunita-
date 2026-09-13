@@ -76,10 +76,12 @@ export function BookingModal({
   const [consultationType, setConsultationType] = useState<ConsultationType>(
     initialConsultationType || 'In-Clinic Consultation'
   );
+  const [additionalMessage, setAdditionalMessage] = useState('');
 
   // UI state
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedBooking, setSubmittedBooking] = useState<ConsultationBooking | null>(null);
   const [supabaseSynced, setSupabaseSynced] = useState<boolean | null>(null);
   const [copiedId, setCopiedId] = useState(false);
@@ -209,6 +211,7 @@ export function BookingModal({
     }
 
     setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
       const res = await saveNewBookingAsync({
@@ -222,12 +225,25 @@ export function BookingModal({
         date: preferredDate,
         time: preferredTime,
         consultationType,
+        additionalMessage: additionalMessage.trim() || undefined,
       });
 
-      setSubmittedBooking(res.booking);
-      setSupabaseSynced(res.supabaseSuccess);
+      if (!res.supabaseSuccess || !res.booking) {
+        // Failed to insert into Supabase: Do NOT generate PDF, do NOT show fake success!
+        const errMsg =
+          res.supabaseError ||
+          'Failed to record consultation booking in database. Please check your internet connection or try again.';
+        setSubmitError(errMsg);
+        const modalContent = document.getElementById('booking-modal-scroll-content');
+        if (modalContent) modalContent.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
 
-      // Automatically generate & download the Appointment Confirmation PDF only after booking is saved
+      setSubmitError(null);
+      setSubmittedBooking(res.booking);
+      setSupabaseSynced(true);
+
+      // Automatically generate & download the Booking Receipt PDF only after successful database INSERT
       try {
         downloadAppointmentPdf(res.booking);
       } catch (pdfErr) {
@@ -235,6 +251,7 @@ export function BookingModal({
       }
     } catch (err) {
       console.error('Error submitting consultation booking:', err);
+      setSubmitError('An unexpected error occurred while saving your booking. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -247,6 +264,7 @@ export function BookingModal({
   const handleResetForAnother = () => {
     setSubmittedBooking(null);
     setSupabaseSynced(null);
+    setSubmitError(null);
     setPatientName('');
     setAge('');
     setGender('Female');
@@ -254,6 +272,7 @@ export function BookingModal({
     setEmail('');
     setAddress('Patna, Bihar');
     setConsultationReason(COMMON_REASONS[0]);
+    setAdditionalMessage('');
     setErrors({});
   };
 
@@ -322,6 +341,23 @@ export function BookingModal({
                ============================================================ */
             <form onSubmit={handleSubmit} id="consultation-booking-form" noValidate className="space-y-5">
               
+              {/* Database Insertion Error Banner if database write failed */}
+              {submitError && (
+                <div
+                  id="supabase-submission-error-banner"
+                  className="p-4 rounded-2xl bg-rose-50 border-2 border-rose-300 text-rose-900 text-xs sm:text-sm flex items-start gap-3 animate-in fade-in"
+                >
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-rose-900">Database Insertion Error</p>
+                    <p className="text-rose-800 leading-relaxed">{submitError}</p>
+                    <p className="text-[11px] text-rose-700">
+                      Your booking was not saved. Please try submitting again or call clinic reception at +91 06124016518.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Validation Summary if errors exist */}
               {Object.keys(errors).length > 0 && (
                 <div
@@ -737,6 +773,21 @@ export function BookingModal({
                     )}
                   </div>
                 </div>
+
+                {/* Field 10: Additional Message / Health Notes (Optional) */}
+                <div className="pt-2">
+                  <label htmlFor="additionalMessage" className="block text-xs font-bold text-slate-700 mb-1.5">
+                    10. Additional Message / Health Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
+                  <textarea
+                    id="additionalMessage"
+                    rows={2}
+                    value={additionalMessage}
+                    onChange={(e) => setAdditionalMessage(e.target.value)}
+                    placeholder="Any specific symptoms, previous pregnancy/cesarean history, medical notes, or questions..."
+                    className="w-full px-4 py-2.5 rounded-xl text-sm transition-all focus:outline-none focus:ring-2 border-slate-200 bg-slate-50/70 focus:bg-white focus:ring-teal-600 border placeholder:text-slate-400"
+                  />
+                </div>
               </div>
 
               {/* Privacy Note required by prompt */}
@@ -750,7 +801,7 @@ export function BookingModal({
                 </div>
               </div>
 
-              {/* Submit Button required by prompt */}
+              {/* Submit Button: Submit Booking */}
               <div className="pt-2">
                 <button
                   type="submit"
@@ -765,7 +816,7 @@ export function BookingModal({
                     </div>
                   ) : (
                     <>
-                      <span>Confirm Consultation Booking</span>
+                      <span>Submit Booking</span>
                       <ChevronRight className="w-5 h-5" />
                     </>
                   )}

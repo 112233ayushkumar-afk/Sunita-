@@ -2,20 +2,63 @@ import { createClient } from '@supabase/supabase-js';
 import { ConsultationBooking, BookingStatus } from '../types';
 
 export const SUPABASE_PROJECT_ID = 'phjakakpqwmhbfnywyyu';
-export const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-export const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_pTbNQOCtZdvP-MgRYTLucA_7u41-nza';
+const DEFAULT_SUPABASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co`;
+const DEFAULT_SUPABASE_ANON_KEY =
+  'sb_publishable_pTbNQOCtZdvP-MgRYTLucA_7u41-nza';
+
+function getValidSupabaseUrl(): string {
+  const envUrl = import.meta.env.VITE_SUPABASE_URL;
+  if (typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    const trimmed = envUrl.trim();
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return trimmed;
+      }
+    } catch {
+      // Not a valid URL (e.g. user entered name or placeholder)
+      console.warn(
+        `[Supabase] "${trimmed}" is not a valid HTTP/HTTPS URL. Falling back to default project URL: ${DEFAULT_SUPABASE_URL}`
+      );
+    }
+  }
+  return DEFAULT_SUPABASE_URL;
+}
+
+function getValidSupabaseAnonKey(): string {
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (typeof envKey === 'string' && envKey.trim().length >= 20) {
+    return envKey.trim();
+  }
+  return DEFAULT_SUPABASE_ANON_KEY;
+}
+
+export const SUPABASE_URL = getValidSupabaseUrl();
+export const SUPABASE_ANON_KEY = getValidSupabaseAnonKey();
 
 export const TABLE_NAME = 'consultation_bookings';
 
-// Initialize Supabase Client
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+// Safe initialization of Supabase Client to prevent top-level runtime crashes
+function initializeSupabaseClient() {
+  try {
+    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  } catch (err) {
+    console.error('[Supabase] Failed to initialize with custom credentials, falling back to default:', err);
+    return createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+}
+
+export const supabase = initializeSupabaseClient();
 
 export const SUPABASE_SETUP_SQL = `-- Run this in your Supabase SQL Editor to set up the database table
 -- Project ID: phjakakpqwmhbfnywyyu
@@ -32,21 +75,23 @@ CREATE TABLE IF NOT EXISTS consultation_bookings (
   date TEXT NOT NULL,
   time TEXT NOT NULL,
   consultation_type TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'Confirmed',
+  additional_message TEXT,
+  status TEXT NOT NULL DEFAULT 'Pending',
+  confirmation TEXT DEFAULT 'Pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE consultation_bookings ENABLE ROW LEVEL SECURITY;
 
--- Allow public and anonymous users to insert new consultation requests
+-- Allow public consultation booking submissions
 CREATE POLICY "Allow public consultation booking submissions"
 ON consultation_bookings
 FOR INSERT
 TO anon, authenticated
 WITH CHECK (true);
 
--- Allow viewing consultation bookings
+-- Allow reading consultation bookings
 CREATE POLICY "Allow reading consultation bookings"
 ON consultation_bookings
 FOR SELECT
@@ -84,7 +129,9 @@ export function toSupabaseRow(booking: ConsultationBooking) {
     date: booking.date,
     time: booking.time,
     consultation_type: booking.consultationType,
-    status: booking.status,
+    additional_message: booking.additionalMessage || null,
+    status: booking.status || 'Pending',
+    confirmation: booking.confirmation || (booking.status === 'Confirmed' ? 'Confirmed' : 'Pending'),
     created_at: booking.createdAt,
   };
 }
@@ -106,7 +153,9 @@ export function fromSupabaseRow(row: any): ConsultationBooking {
     date: row.date || new Date().toISOString().split('T')[0],
     time: row.time || '10:00 AM',
     consultationType: row.consultation_type || row.consultationType || 'In-Clinic Consultation',
-    status: (row.status as BookingStatus) || 'Confirmed',
+    additionalMessage: row.additional_message || row.additionalMessage || undefined,
+    status: (row.status as BookingStatus) || 'Pending',
+    confirmation: row.confirmation || undefined,
     createdAt: row.created_at || row.createdAt || new Date().toISOString(),
     syncedToSupabase: true,
   };
@@ -208,6 +257,35 @@ export async function fetchBookingsFromSupabase(): Promise<{
 }
 
 /**
+ * Fetch a single booking by ID (used for patient status lookup)
+ */
+export async function fetchBookingById(
+  id: string
+): Promise<{ data: ConsultationBooking | null; error?: string }> {
+  try {
+    const trimmedId = id.trim().toUpperCase();
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .eq('id', trimmedId)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+
+    if (!data) {
+      return { data: null };
+    }
+
+    return { data: fromSupabaseRow(data) };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Network error';
+    return { data: null, error: msg };
+  }
+}
+
+/**
  * Update booking status in Supabase
  */
 export async function updateBookingStatusInSupabase(
@@ -217,7 +295,10 @@ export async function updateBookingStatusInSupabase(
   try {
     const { error } = await supabase
       .from(TABLE_NAME)
-      .update({ status })
+      .update({
+        status,
+        confirmation: status,
+      })
       .eq('id', id);
 
     if (error) {

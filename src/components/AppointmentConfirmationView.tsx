@@ -75,17 +75,20 @@ export function AppointmentConfirmationView({
   return (
     <div id="appointment-confirmation-screen" className="space-y-6 text-center animate-in fade-in duration-300">
       
-      {/* 1. Exact Header Requirement: ✅ Appointment Confirmed */}
+      {/* 1. Header Requirement: Booking Request Submitted Successfully & Pending confirmation */}
       <div className="space-y-3">
-        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-50 border-4 border-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
-          <CheckCircle2 className="w-9 h-9 sm:w-11 sm:h-11" />
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-amber-50 border-4 border-amber-100 text-amber-600 flex items-center justify-center mx-auto shadow-inner">
+          <Clock className="w-9 h-9 sm:w-11 sm:h-11" />
         </div>
         <div>
           <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center justify-center gap-2">
-            <span>✅ Appointment Confirmed</span>
+            <span>Booking Request Submitted Successfully</span>
           </h3>
-          <p className="mt-1.5 text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-            Your appointment has been successfully scheduled with Dr. Amita Singh. An official appointment confirmation PDF has been automatically generated.
+          <p className="mt-1.5 text-base sm:text-lg font-bold text-amber-800 max-w-md mx-auto leading-relaxed">
+            Your consultation request is Pending confirmation.
+          </p>
+          <p className="mt-1 text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
+            Our clinic reception has received your details and will verify Dr. Amita Singh's schedule to confirm your appointment.
           </p>
         </div>
       </div>
@@ -129,16 +132,10 @@ export function AppointmentConfirmationView({
           <span className="font-bold text-slate-900">{booking.patientName}</span>
         </div>
 
-        {/* Age */}
+        {/* Age & Gender */}
         <div className="flex items-center justify-between text-sm pb-2.5 border-b border-slate-200/80">
-          <span className="text-slate-500 font-medium">Age</span>
-          <span className="font-semibold text-slate-900">{booking.age} Years</span>
-        </div>
-
-        {/* Gender */}
-        <div className="flex items-center justify-between text-sm pb-2.5 border-b border-slate-200/80">
-          <span className="text-slate-500 font-medium">Gender</span>
-          <span className="font-semibold text-slate-900">{booking.gender}</span>
+          <span className="text-slate-500 font-medium">Age &amp; Gender</span>
+          <span className="font-semibold text-slate-900">{booking.age} Years · {booking.gender}</span>
         </div>
 
         {/* Mobile Number */}
@@ -172,12 +169,32 @@ export function AppointmentConfirmationView({
           </span>
         </div>
 
-        {/* Status: Automatically CONFIRMED (No Pending Confirmation anywhere) */}
+        {/* Consultation Reason */}
+        <div className="flex items-center justify-between text-sm pb-2.5 border-b border-slate-200/80">
+          <span className="text-slate-500 font-medium">Reason</span>
+          <span className="font-medium text-slate-900 truncate max-w-[200px] sm:max-w-xs">{booking.consultationReason}</span>
+        </div>
+
+        {/* Additional Message (if present) */}
+        {booking.additionalMessage && (
+          <div className="flex flex-col text-sm pb-2.5 border-b border-slate-200/80 gap-1">
+            <span className="text-slate-500 font-medium">Additional Notes</span>
+            <span className="text-xs text-slate-700 italic bg-white p-2 rounded-lg border border-slate-200/80">
+              "{booking.additionalMessage}"
+            </span>
+          </div>
+        )}
+
+        {/* Status: Initial status ALWAYS 'Pending' */}
         <div className="flex items-center justify-between text-sm pt-1">
           <span className="text-slate-500 font-medium">Booking Status</span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
-            <Check className="w-3.5 h-3.5 text-emerald-700" />
-            <span>CONFIRMED</span>
+          <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-extrabold ${
+            booking.status === 'Confirmed'
+              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+              : 'bg-amber-100 text-amber-800 border border-amber-300'
+          }`}>
+            <Clock className="w-3.5 h-3.5" />
+            <span>{booking.status}</span>
           </span>
         </div>
 
@@ -186,7 +203,7 @@ export function AppointmentConfirmationView({
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-teal-700 shrink-0" />
             <span className="font-semibold">
-              {supabaseSynced ? 'Stored in Supabase Cloud Database' : 'Saved to Clinic Records'}
+              {supabaseSynced ? 'Saved in Supabase: consultation_bookings' : 'Saved to Clinic Records'}
             </span>
           </div>
           <span className="font-mono text-[10px] text-teal-700 bg-white/80 px-2 py-0.5 rounded border border-teal-200">
@@ -197,7 +214,7 @@ export function AppointmentConfirmationView({
 
       {/* 3. Prominent PDF Generation & Download Action */}
       <div className="space-y-3">
-        {/* Main "Download Appointment PDF" button */}
+        {/* Main "Download PDF Booking Receipt" button */}
         <button
           type="button"
           id="download-appointment-pdf-btn"
@@ -206,11 +223,11 @@ export function AppointmentConfirmationView({
           className="w-full flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-base shadow-lg shadow-teal-700/20 transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
         >
           <Download className="w-5 h-5 text-teal-100" />
-          <span>{downloadSuccess ? 'PDF Downloaded Successfully!' : 'Download Appointment PDF'}</span>
+          <span>{downloadSuccess ? 'PDF Downloaded Successfully!' : 'Download PDF Booking Receipt'}</span>
         </button>
 
         <p className="text-xs text-slate-500">
-          Your official appointment slip with clinic details, unique Booking ID, and visit instructions has been prepared for print or save.
+          Your official consultation booking receipt with unique Booking ID ({booking.id}) and clinic visit instructions is ready to save or print.
         </p>
       </div>
 

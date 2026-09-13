@@ -9,7 +9,7 @@ import {
 const STORAGE_KEY = 'dr_amita_consultation_bookings_v2';
 export const BOOKING_UPDATE_EVENT = 'dr_amita_booking_updated';
 
-// Realistic initial sample bookings so doctor/admin portal has data out of the box
+// Initial sample bookings demonstrating both Pending and Confirmed workflows
 const INITIAL_SEED_BOOKINGS: ConsultationBooking[] = [
   {
     id: 'DAS-2026-7842',
@@ -23,8 +23,10 @@ const INITIAL_SEED_BOOKINGS: ConsultationBooking[] = [
     date: '2026-09-10',
     time: '10:30 AM - 11:30 AM',
     consultationType: 'In-Clinic Consultation',
-    status: 'Confirmed',
-    createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+    additionalMessage: 'Second pregnancy after previous cesarean. Seeking Dr. Amita Singh for antenatal guidance.',
+    status: 'Pending',
+    confirmation: 'Pending',
+    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
     syncedToSupabase: false,
   },
   {
@@ -40,6 +42,7 @@ const INITIAL_SEED_BOOKINGS: ConsultationBooking[] = [
     time: '12:00 PM - 01:00 PM',
     consultationType: 'In-Clinic Consultation',
     status: 'Confirmed',
+    confirmation: 'Confirmed',
     createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
     syncedToSupabase: false,
   },
@@ -54,8 +57,10 @@ const INITIAL_SEED_BOOKINGS: ConsultationBooking[] = [
     date: '2026-09-12',
     time: '05:30 PM - 06:30 PM',
     consultationType: 'Online Consultation',
-    status: 'Confirmed',
-    createdAt: new Date(Date.now() - 3600000 * 8).toISOString(),
+    additionalMessage: 'Requesting online consultation via video call due to work hours.',
+    status: 'Pending',
+    confirmation: 'Pending',
+    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
     syncedToSupabase: false,
   },
 ];
@@ -70,14 +75,7 @@ export function getStoredBookings(): ConsultationBooking[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Auto-migrate any legacy "Pending Confirmation" items to "Confirmed"
-      const cleaned = parsed.map((item) => {
-        if ((item.status as string) === 'Pending Confirmation') {
-          return { ...item, status: 'Confirmed' as BookingStatus };
-        }
-        return item;
-      });
-      return cleaned;
+      return parsed;
     }
     return INITIAL_SEED_BOOKINGS;
   } catch (err) {
@@ -97,72 +95,85 @@ export function generateUniqueBookingId(): string {
 }
 
 /**
- * Asynchronous save that pushes to Supabase database while ensuring local storage persistence.
- * Booking status is automatically CONFIRMED upon successful submission.
+ * Asynchronous save that inserts the booking into Supabase database table 'consultation_bookings'.
+ * Initial status must ALWAYS be 'Pending'.
+ * Never shows Confirmed immediately.
+ * If Supabase INSERT fails, returns an error and does NOT fake success.
  */
 export async function saveNewBookingAsync(
-  bookingInput: Omit<ConsultationBooking, 'id' | 'createdAt' | 'status' | 'syncedToSupabase'>
+  bookingInput: Omit<ConsultationBooking, 'id' | 'createdAt' | 'status' | 'syncedToSupabase' | 'confirmation'>
 ): Promise<{
-  booking: ConsultationBooking;
+  booking?: ConsultationBooking;
   supabaseSuccess: boolean;
   supabaseError?: string;
 }> {
   const newId = generateUniqueBookingId();
 
-  let newBooking: ConsultationBooking = {
+  const newBooking: ConsultationBooking = {
     ...bookingInput,
     id: newId,
-    status: 'Confirmed',
+    status: 'Pending',
+    confirmation: 'Pending',
     createdAt: new Date().toISOString(),
     syncedToSupabase: false,
   };
 
-  // 1. Immediately persist locally so patient data is never lost
-  try {
-    const existing = getStoredBookings();
-    const updated = [newBooking, ...existing];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(BOOKING_UPDATE_EVENT, { detail: newBooking }));
-    }
-  } catch (err) {
-    console.error('Error saving booking to localStorage:', err);
-  }
-
-  // 2. Persist to Supabase
+  // 1. Must INSERT into Supabase consultation_bookings first
   try {
     const res = await insertBookingToSupabase(newBooking);
-    if (res.success) {
-      newBooking = { ...newBooking, syncedToSupabase: true };
-      // Update local storage entry with synced flag
+
+    if (!res.success) {
+      // Supabase INSERT failed. Do NOT pretend success, do NOT generate PDF!
+      return {
+        supabaseSuccess: false,
+        supabaseError: res.error || 'Failed to record booking in the database. Please try again.',
+      };
+    }
+
+    // 2. Supabase INSERT succeeded!
+    const savedBooking: ConsultationBooking = {
+      ...newBooking,
+      syncedToSupabase: true,
+    };
+
+    // Cache locally for offline resiliency and admin synchronization
+    try {
       const existing = getStoredBookings();
-      const updated = existing.map((item) => (item.id === newId ? newBooking : item));
+      const updated = [savedBooking, ...existing.filter((b) => b.id !== newId)];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(BOOKING_UPDATE_EVENT, { detail: newBooking }));
+        window.dispatchEvent(new CustomEvent(BOOKING_UPDATE_EVENT, { detail: savedBooking }));
       }
-      return { booking: newBooking, supabaseSuccess: true };
-    } else {
-      return { booking: newBooking, supabaseSuccess: false, supabaseError: res.error };
+    } catch (cacheErr) {
+      console.warn('Local storage cache update warning:', cacheErr);
     }
+
+    return {
+      booking: savedBooking,
+      supabaseSuccess: true,
+    };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to connect to Supabase';
-    return { booking: newBooking, supabaseSuccess: false, supabaseError: msg };
+    const msg = err instanceof Error ? err.message : 'Network error communicating with database';
+    return {
+      supabaseSuccess: false,
+      supabaseError: msg,
+    };
   }
 }
 
 /**
- * Synchronous version for simple calls (also triggers Supabase insert in background)
+ * Synchronous version for simple calls (initial status ALWAYS 'Pending')
  */
 export function saveNewBooking(
-  bookingInput: Omit<ConsultationBooking, 'id' | 'createdAt' | 'status' | 'syncedToSupabase'>
+  bookingInput: Omit<ConsultationBooking, 'id' | 'createdAt' | 'status' | 'syncedToSupabase' | 'confirmation'>
 ): ConsultationBooking {
   const newId = generateUniqueBookingId();
 
   const newBooking: ConsultationBooking = {
     ...bookingInput,
     id: newId,
-    status: 'Confirmed',
+    status: 'Pending',
+    confirmation: 'Pending',
     createdAt: new Date().toISOString(),
     syncedToSupabase: false,
   };
@@ -202,7 +213,9 @@ export function saveNewBooking(
 export function updateBookingStatus(id: string, status: BookingStatus): ConsultationBooking[] {
   try {
     const existing = getStoredBookings();
-    const updated = existing.map((item) => (item.id === id ? { ...item, status } : item));
+    const updated = existing.map((item) =>
+      item.id === id ? { ...item, status, confirmation: status } : item
+    );
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(BOOKING_UPDATE_EVENT));
